@@ -1,0 +1,22 @@
+preciso @click="test"
+
+
+
+const axios = require('axios')
+
+const axios_client = axios.creat({
+    baseURL: "http://localhost:3000",
+});
+
+async function test(){
+    axios_client
+        .get("/users",{
+            //headers:{Authorization: "Bearer"+token},
+        })
+        .then((response)=>{
+            console.log(response.data);
+        })
+        .catch((error)=>{
+            console.log(erro)
+        });
+}
