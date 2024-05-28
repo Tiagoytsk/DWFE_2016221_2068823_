@@ -16,14 +16,13 @@
         </q-toolbar-title>
       </q-toolbar>
     </q-header>
-
     <q-drawer 
     show-if-above 
     v-model="leftDrawerOpen" 
     :width="283"
     side="left" 
     bordered
-    > <!-- Menu navegacao do lado esquerdo -->
+    >
       <q-icon 
       class="q-ma-md"
       name="fa-solid fa-skull-crossbones" 
@@ -74,7 +73,7 @@
     
 
 
-    <q-drawer show-if-above v-model="rightDrawerOpen" side="right" bordered>
+    <q-drawer show-if-above v-model="rightDrawerOpen" :width="283" side="right" bordered>
       <q-input 
       placeholders="Search skukl"
       class="q-ma-md"
@@ -97,8 +96,7 @@
 
                 </div>
                 <div class="col">
-                  <q-btn :color="followedUsers[user.user] ? 'green' : 'grey'" icon="fa-solid fa-user-plus" size="sm" flat round @click="addFollower(user)"/>              
-                </div>
+                  <q-btn :color="isFollowing[user.user] ? 'green' : 'grey'" icon="fa-solid fa-user-plus" size="sm" flat round @click="addFollower(user.user)"/>                </div>
             </div>
             </div>
           </q-item-section>
@@ -115,16 +113,25 @@
 
 <script>
 import { ref, watch } from 'vue'
-import { onSnapshot, collection, addDoc, getDocs, query, doc, deleteDoc, where } from 'firebase/firestore'
+
+import { onSnapshot, collection, addDoc, getDocs, query, doc, deleteDoc, where , serverTimestamp} from 'firebase/firestore'
 import db from '../boot/firebase';
 
 
 export default {
+  watch: {
+    currentUser() {
+      this.$forceUpdate();
+    },
+  },
   setup () {
     const leftDrawerOpen = ref(false)
     const rightDrawerOpen = ref(false)
     const toggleLeftDrawer = () => {
       leftDrawerOpen.value = !leftDrawerOpen.value
+    }
+    const toggleRightDrawer = () => {
+      rightDrawerOpen.value = !rightDrawerOpen.value
     }
 
     const users = ref([])
@@ -138,14 +145,14 @@ export default {
     watch(currentUser, fetchUsers, { immediate: true })
 
     const deleteUser = async (id) => {
-      if (currentUser.value.tipo !== 1) {
-        // if the current user's tipo is not 1, don't delete the user
-        return
-      }
+  if (currentUser.value && currentUser.value.tipo === '1') {
+    // if the current user's tipo is not 1, don't delete the user
+    return
+  }
 
-      const userRef = doc(db, 'users', id)
-      await deleteDoc(userRef)
-    }
+  const userRef = doc(db, 'users', id)
+  await deleteDoc(userRef)
+}
 
 
     return {
@@ -153,6 +160,7 @@ export default {
       rightDrawerOpen,
       users,
       toggleLeftDrawer,
+      toggleRightDrawer,
       deleteUser,
       currentUser
       
@@ -160,24 +168,41 @@ export default {
   },
   data() {
   return {
-    followedUsers: {}
+    followedUsers: {},
+    isFollowing: {},
   }
 },
+
 created() {
   this.checkFollowStatus()
 },
+created() {
+  this.isFollowing = JSON.parse(localStorage.getItem('isFollowing')) || {};
+  this.checkFollowStatus();
+},
   methods:{
-    async unfollow(unfollowedUser) {
-    const currentUser = JSON.parse(localStorage.getItem('currentUser'))
-    const followCollectionRef = collection(db, 'follow')
-    const q = query(followCollectionRef, where("following", "==", currentUser.user), where("follower", "==", unfollowedUser.user));
-    const querySnapshot = await getDocs(q);
-    if (!querySnapshot.empty) {
-      const docRef = doc(db, 'follow', querySnapshot.docs[0].id);
-      await deleteDoc(docRef);
-      this.followedUsers[unfollowedUser.user] = false
+    async unfollow(userToUnfollow) {
+    // Check if the current user is following the userToUnfollow
+    if (this.followingUsers[userToUnfollow.id]) {
+      // Remove userToUnfollow from the followingUsers list
+      delete this.followingUsers[userToUnfollow.id];
+
+      // Update the followingUsers list in the database
+      const userRef = doc(db, 'users', this.currentUser.id);
+      await updateDoc(userRef, {
+        following: this.followingUsers
+      });
     }
   },
+  async created() {
+  const currentUser = this.currentUser; // Assuming currentUser is defined in your component
+  const followedUser = this.followedUser; // Assuming followedUser is defined in your component
+
+  const followCollectionRef = collection(db, 'follow')
+  const q = query(followCollectionRef, where("following", "==", currentUser.user), where("follower", "==", followedUser));
+  const querySnapshot = await getDocs(q);
+  this.isFollowing = !querySnapshot.empty;
+},
     async checkFollowStatus() {
   const currentUser = JSON.parse(localStorage.getItem('currentUser'))
   for (let user of this.users) {
@@ -189,32 +214,48 @@ created() {
     }
   }
 },
-    async addFollower(followedUser) {
-    const currentUser = JSON.parse(localStorage.getItem('currentUser'))
-    const user = JSON.parse(localStorage.getItem('user'))
-    if (currentUser === null || user === null) {
-      console.error('Current user or user is null')
-      return
-    }
-    console.log('Current user:', currentUser)
-    console.log('User:', user)
+async addFollower(followedUser) {
+  const currentUser = this.currentUser; // Assuming currentUser is defined in your component
 
-    const followCollectionRef = collection(db, 'follow')
-    const q = query(followCollectionRef, where("following", "==", currentUser.user), where("follower", "==", user.user));
-    const querySnapshot = await getDocs(q);
-    if (!querySnapshot.empty) {
-      console.error('User is already followed')
-      return
-    }
+  if (!currentUser || !followedUser) {
+    console.error('Current user or followed user is null')
+    return
+}
 
-    const newFollowDoc = {
-      following: currentUser.user,
-      follower: user.user
-    }
-    console.log('New follow doc:', newFollowDoc)
+const followCollectionRef = collection(db, 'follow')
+const q = query(followCollectionRef, where("following", "==", currentUser.user), where("follower", "==", followedUser));
+const querySnapshot = await getDocs(q);
+if (!querySnapshot.empty) {
+  let newFollowDoc = {
+    followerId: this.currentUser.id,
+    followedId: followedUser.id,
+    timestamp: serverTimestamp()
+  };
+    // User is already followed, so unfollow
     await addDoc(followCollectionRef, newFollowDoc)
-    this.followedUsers[followedUser.user] = true
+  this.isFollowing[followedUser] = true;
+  console.log('User is now followed')
+    this.isFollowing[followedUser] = false;
+    console.log('User is now unfollowed')
+  } else {
+    
+    await addDoc(followCollectionRef, newFollowDoc)
+    this.isFollowing[followedUser] = true;
+    console.log('User is now followed')
   }
+  localStorage.setItem('isFollowing', JSON.stringify(this.isFollowing));
+
+
+const newFollowDoc = {
+    following: currentUser.user,
+    follower: followedUser
+}
+
+// Add the new follower document to the follow collection
+await addDoc(followCollectionRef, newFollowDoc)
+  this.isFollowing[followedUser] = true;
+  console.log('User is now followed')
+}
   }
 }
 </script>

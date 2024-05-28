@@ -1,8 +1,9 @@
 <template>
   <div>
     <div v-if="isLogin && user">
-      <p>Welcome, {{ user.user }}!</p>
-      <button @click="logout">Logout</button>
+      <p style="margin-left: 50px; margin-right: 50px; margin-top: 20px;">Welcome, {{ user.user }}!</p>
+      <q-btn style="margin-left: 50px; margin-right: 50px; margin-top: 20px;" @click="logout" color="primary" >Logout</q-btn>
+      
     </div>
     <div v-else>
       <q-btn style="margin-left: 50px; margin-right: 50px; margin-top: 20px;" @click="switchForm" color="primary" >
@@ -70,6 +71,7 @@ export default {
       user.value = null;
       localStorage.removeItem('user');
       localStorage.removeItem('isLogin');
+      localStorage.removeItem('userHasLiked');
     };
 
     const switchForm = () => {
@@ -100,32 +102,32 @@ export default {
     };
 
     const register = async () => {
-  try {
-    // Check if user already exists
-    const userRef = collection(db, 'users');
-    const userSnapshot = await getDocs(userRef);
-    const existingUser = userSnapshot.docs.find(doc => doc.data().user === username.value);
+      try {
+        // Check if username already exists
+        const userQuerySnapshot = await getDocs(collection(db, 'users'));
+        for (const doc of userQuerySnapshot.docs) {
+          const userData = doc.data();
+          if (userData.user === username.value) {
+            error.value = 'Username already exists';
+            return;
+          }
+        }
 
-    if (existingUser) {
-      console.error('User already registered: ', username.value);
-      error.value = 'User already registered.';
-      return;
-    }
+        // Add new user to the database
+        await addDoc(collection(db, 'users'), {
+          user: username.value,
+          pass: password.value,
+          tipo: 0,
+        });
 
-    // If user does not exist, proceed with registration
-    const docRef = await addDoc(collection(db, 'users'), {
-      user: username.value,
-      pass: password.value,
-      tipo: 0
-    });
-
-    console.log('User registered with ID: ', docRef.id);
-    user.value = { user: username.value, pass: password.value };
-  } catch (err) {
-    console.error('Error registering user: ', err);
-    error.value = 'An error occurred while registering.';
-  }
-};
+        // Clear the form
+        username.value = '';
+        password.value = '';
+      } catch (err) {
+        console.error(err);
+        error.value = 'Failed to register';
+      }
+    };
 
     const checkLogin = () => {
       const storedUser = JSON.parse(localStorage.getItem('user'));

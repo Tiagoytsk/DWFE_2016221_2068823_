@@ -47,8 +47,8 @@
             <q-btn color="grey" icon="fas fa-retweet" size="sm" flat round />
             <q-btn 
   @click="like(tweet.id)" 
-  :icon="likedTweets[tweet.id] ? 'far fa-heart' : 'fa-solid fa-heart'" 
-  color="pink" 
+  :icon="userHasLiked[tweet.id] ? 'fas fa-heart' : 'far fa-heart'" 
+  :color="userHasLiked[tweet.id] ? 'pink' : 'grey'" 
   size="sm" 
   flat 
   round
@@ -60,7 +60,6 @@
         </q-item-section>
 
         <q-item-section side top>
-          
           {{ relativeDate(tweet.date) }}
         </q-item-section>
       </q-item>
@@ -85,18 +84,98 @@ export default {
       tweets:[],
       tweet_id: '',
       likesCount: {},
-      likedTweets: {}
+      likedTweets: {},
+      userHasLiked: {},
+      userHasLiked: JSON.parse(localStorage.getItem('userHasLiked')) || {},
+    }
+  },
+  watch: {
+    userHasLiked: {
+      handler(newValue) {
+        localStorage.setItem('userHasLiked', JSON.stringify(newValue));
+      },
+      deep: true,
+    },
+  },
+  async created() {
+    const user = JSON.parse(localStorage.getItem('user'));
+    const user_id = user.user;
+
+    if (!localStorage.getItem('userHasLiked')) {
+      const tweetsSnapshot = await getDocs(collection(db, 'tweets'));
+      for (let doc of tweetsSnapshot.docs) {
+        this.tweets.push(doc.data());
+        await this.getLikesCount(doc.id);
+        await this.checkUserHasLiked(doc.id, user_id);
+      }
     }
   },
   methods:{
+    async checkUserHasLiked(tweet_id, user_id) {
+      const q = query(
+        collection(db, 'likes'),
+        where('tweet_id', '==', tweet_id),
+        where('user_id', '==', user_id)
+      );
+      const querySnapshot = await getDocs(q);
+      this.userHasLiked[tweet_id] = !querySnapshot.empty;
+    },
+    async getLikesCount(tweet_id) {
+      const q = query(
+        collection(db, 'likes'),
+        where('tweet_id', '==', tweet_id)
+      );
+      const querySnapshot = await getDocs(q);
+      this.likesCount[tweet_id] = querySnapshot.size;
+    },
+    async like(tweet_id) {
+      try {
+        // Retrieve user data from localStorage and parse it
+        const user = JSON.parse(localStorage.getItem('user'));
+
+        if (!user) {
+          console.error('No user found in localStorage');
+          return;
+        }
+
+        // Use the 'user' field as the user_id
+        const user_id = user.user;
+
+        await this.checkUserHasLiked(tweet_id, user_id);
+
+        if (this.userHasLiked[tweet_id]) {
+          // The user has already liked this tweet, so unlike it.
+          const q = query(
+            collection(db, 'likes'),
+            where('tweet_id', '==', tweet_id),
+            where('user_id', '==', user_id)
+          );
+          const querySnapshot = await getDocs(q);
+          querySnapshot.forEach(async (doc) => {
+            await deleteDoc(doc.ref);
+          });
+          this.userHasLiked[tweet_id] = false;
+        } else {
+          // The tweet is not liked by the user, so add the like.
+          await addDoc(collection(db, 'likes'), {
+            tweet_id: tweet_id,
+            user_id: user_id
+          });
+          this.userHasLiked[tweet_id] = true;
+        }
+        await this.getLikesCount(tweet_id);
+      } catch (error) {
+        console.error(error);
+      }
+    },
     async countLikes(tweet_id) {
-    const q = query(
-      collection(db, 'likes'),
-      where('tweet_id', '==', tweet_id)
-    );
-    const querySnapshot = await getDocs(q);
-    this.likesCount[tweet_id] = querySnapshot.size;
-  },
+      const q = query(
+        collection(db, 'likes'),
+        where('tweet_id', '==', tweet_id)
+      );
+      const querySnapshot = await getDocs(q);
+      this.likesCount[tweet_id] = querySnapshot.size;
+    },
     async newtweet(){
       let storedUser = JSON.parse(localStorage.getItem('user'));
       if (!storedUser) {
@@ -136,77 +215,19 @@ export default {
       return formatDistance(tweetDate, now);
     }
   },
-
-async mounted() {
-  const tweetCollection = collection(db, 'tweets');
-  const q = query(tweetCollection, orderBy('date', 'desc')); // Order by 'created_at' field in descending order
-  const tweetSnapshot = await getDocs(q);
-  this.tweets = tweetSnapshot.docs.map(doc => ({ id: doc.id, user: doc.data().user, ...doc.data() }));
-  this.tweets.forEach(tweet => {
-    this.countLikes(tweet.id);
-  });
-},
+    async mounted() {
+      const tweetCollection = collection(db, 'tweets');
+      const q = query(tweetCollection, orderBy('date', 'desc')); // Order by 'created_at' field in descending order
+      const tweetSnapshot = await getDocs(q);
+      this.tweets = tweetSnapshot.docs.map(doc => ({ id: doc.id, user: doc.data().user, ...doc.data() }));
+      this.tweets.forEach(tweet => {
+        this.countLikes(tweet.id);
+      });
+    },
 created() {
   this.tweets.forEach(tweet => {
     this.countLikes(tweet.id);
   });
-},
-
-setup() {
-  const userHasLiked = async (tweet_id, user_id) => {
-    const q = query(
-      collection(db, 'likes'),
-      where('tweet_id', '==', tweet_id),
-      where('user_id', '==', user_id)
-    );
-    const querySnapshot = await getDocs(q);
-    return !querySnapshot.empty;
-  };
-
-  const like = async (tweet_id) => {
-  try {
-    // Retrieve user data from localStorage and parse it
-    const user = JSON.parse(localStorage.getItem('user'));
-
-    if (!user) {
-      console.error('No user found in localStorage');
-      return;
-    }
-
-    // Use the 'user' field as the user_id
-    const user_id = user.user;
-
-    if (await userHasLiked(tweet_id, user_id)) {
-      // The tweet is already liked by the user, so remove the like.
-      const q = query(
-        collection(db, 'likes'),
-        where('tweet_id', '==', tweet_id),
-        where('user_id', '==', user_id)
-      );
-      const querySnapshot = await getDocs(q);
-      const likeDoc = querySnapshot.docs[0];
-      await deleteDoc(doc(db, 'likes', likeDoc.id));
-      likedTweets.value[tweet_id] = false;
-    } else {
-      // The tweet is not liked by the user, so add a like.
-      await addDoc(collection(db, 'likes'), {
-        tweet_id: tweet_id,
-        user_id: user_id,
-        // other fields...
-      });
-      likedTweets.value[tweet_id] = true;
-    }
-    // Update the likes count.
-    countLikes(tweet_id);
-  } catch (error) {
-    console.error('Failed to like/unlike tweet:', error);
-  }
-};
-
-  return {
-    like,
-    userHasLiked
-  };
 },
 };
 </script>
